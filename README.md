@@ -54,9 +54,11 @@ xvfb-run uv run python do_renew.py
 
 ## 定时任务
 
+免费域名有效期较长，建议每 3 个月运行一次即可。
+
 ```bash
 crontab -e
 
-# 每周日凌晨 3 点运行
-0 3 * * 0 cd /path/to/domain-renew && xvfb-run /home/user/.local/bin/uv run python do_renew.py >> /tmp/domain-renew.log 2>&1
+# 每季度 1 号凌晨 3 点运行 (1月、4月、7月、10月)
+0 3 1 1,4,7,10 * cd /path/to/domain-renew && xvfb-run /home/user/.local/bin/uv run python do_renew.py >> /tmp/domain-renew.log 2>&1
 ```
