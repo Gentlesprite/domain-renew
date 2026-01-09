@@ -2,6 +2,8 @@
 
 自动续期 DigitalPlat (dash.domain.digitalplat.org) 的免费域名。
 
+> ⚠️ 本项目仅供学习网页自动化技术使用，请遵守 DigitalPlat 的服务条款。
+
 ## 功能
 
 - 支持多账号
