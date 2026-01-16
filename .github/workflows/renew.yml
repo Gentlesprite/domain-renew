@@ -1,0 +1,43 @@
+name: Domain Renew
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 每天 UTC 4:00 (北京时间 12:00)
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install playwright requests
+          playwright install chromium
+          playwright install-deps chromium
+      
+      - name: Create .env
+        run: |
+          cat > .env << EOF
+          ACCOUNTS=${{ secrets.ACCOUNTS }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          EOF
+      
+      - name: Restore sessions
+        uses: actions/cache@v4
+        with:
+          path: sessions
+          key: domain-sessions-${{ github.run_id }}
+          restore-keys: |
+            domain-sessions-
+      
+      - name: Run renew script
+        run: xvfb-run python do_renew.py
+        timeout-minutes: 15
