@@ -177,7 +177,13 @@ async def login(page, cdp, context, email, password):
         log("登录成功!")
         return True
     
-    log("登录失败")
+    # 调试信息
+    log(f"登录失败 - 当前URL: {url}")
+    try:
+        page_text = await page.evaluate('() => document.body.innerText.substring(0, 500)')
+        log(f"页面内容: {page_text[:200]}...")
+    except:
+        pass
     return False
 
 async def get_domains(page, cdp):
