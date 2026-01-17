@@ -1,70 +1,68 @@
-# DigitalPlat 免费域名自动续期脚本
+# 域名自动续期脚本
 
-自动续期 DigitalPlat (dash.domain.digitalplat.org) 的免费域名。
-
-## ⚠️ 免责声明
-
-本项目仅供学习网页自动化技术使用。使用本脚本可能违反相关网站的服务条款，包括但不限于：
-- 禁止使用自动化工具访问
-- 禁止绕过安全验证措施
-
-**使用本项目的风险由用户自行承担**，包括但不限于账号被封禁、服务被终止等后果。请在使用前仔细阅读相关网站的服务条款。
+自动续期 digitalplat.org 免费域名 (us.kg, pp.ua, eu.org 等)。
 
 ## 功能
 
-- 支持多账号
-- 自动登录
+- 支持多账号批量处理
+- 自动发现账号下所有域名
+- 智能判断是否在续期窗口内 (180天)
 - 自动处理 Cloudflare 验证
-- 自动续期即将到期的域名
-- 保存会话供下次使用
-- Telegram 通知
+- 会话持久化
+- Telegram 通知支持
 
-## 安装
+## 青龙面板使用
+
+### 1. 添加订阅
+
+在青龙面板的「订阅管理」中添加：
+
+- **名称**: domain-renew
+- **链接**: `https://github.com/donma033x/domain-renew.git`
+- **分支**: main
+- **定时规则**: `0 8 * * *`
+
+### 2. 配置环境变量
+
+在青龙面板的「环境变量」中添加：
+
+| 变量名 | 说明 | 示例 |
+|--------|------|------|
+| `ACCOUNTS_DOMAIN` | 账号配置 | `邮箱:密码,邮箱2:密码2` |
+| `TELEGRAM_BOT_TOKEN` | TG机器人Token | (可选) |
+| `TELEGRAM_CHAT_ID` | TG聊天ID | (可选) |
+
+**账号格式**: `邮箱:密码`，多账号用逗号分隔
+
+### 3. 安装依赖
+
+在青龙面板的「依赖管理」→「Python3」中安装：
+
+```
+playwright
+requests
+```
+
+### 4. 系统依赖
+
+需要在容器中安装 xvfb:
 
 ```bash
-# 安装系统依赖
-sudo apt install xvfb  # Debian/Ubuntu
-# sudo yum install xorg-x11-server-Xvfb  # CentOS/RHEL
-
-# 安装 uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 安装项目依赖
-uv sync
-
-# 安装 Playwright 浏览器
-uv run playwright install chromium
+apt-get update && apt-get install -y xvfb xauth
 ```
 
-## 配置
+### 5. 定时任务
+
+建议每季度执行一次:
+- 定时规则: `0 8 1 1,4,7,10 *` (1月、4月、7月、10月的1号 8:00)
+
+## 手动运行
 
 ```bash
-cp .env.example .env
-vim .env
+export ACCOUNTS_DOMAIN="your@email.com:password"
+xvfb-run python3 do_renew.py
 ```
 
-```env
-# 账号配置 (格式: email:password，多账号逗号分隔)
-ACCOUNTS=email@example.com:password
+## 许可
 
-# Telegram 通知 (可选)
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-```
-
-## 运行
-
-```bash
-xvfb-run uv run python do_renew.py
-```
-
-## 定时任务
-
-免费域名有效期较长，建议每 3 个月运行一次即可。
-
-```bash
-crontab -e
-
-# 每季度 1 号凌晨 3 点运行 (1月、4月、7月、10月)
-0 3 1 1,4,7,10 * cd /path/to/domain-renew && xvfb-run /home/user/.local/bin/uv run python do_renew.py >> /tmp/domain-renew.log 2>&1
-```
+MIT License

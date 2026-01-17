@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """
 域名续期执行脚本 - 自动发现并续期所有域名 + Telegram 通知
+
+cron: 0 8 1 1,4,7,10 *
+new Env('domain-renew')
+
+环境变量:
+    ACCOUNTS_DOMAIN: 账号配置，格式: 邮箱:密码,邮箱2:密码2
+    TELEGRAM_BOT_TOKEN: Telegram机器人Token (可选)
+    TELEGRAM_CHAT_ID: Telegram聊天ID (可选)
 """
 
+import os
 import asyncio
 import json
 import re
@@ -11,28 +20,10 @@ from pathlib import Path
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-# ==================== 加载配置 ====================
-def load_env():
-    env_file = Path(__file__).parent / '.env'
-    env_vars = {}
-    if not env_file.exists():
-        return env_vars
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, value = line.split('=', 1)
-                env_vars[key.strip()] = value.strip()
-    return env_vars
-
-ENV = load_env()
-
-# 账号配置
-ACCOUNTS_STR = ENV.get('ACCOUNTS', '')
-
-# Telegram 配置
-TELEGRAM_BOT_TOKEN = ENV.get('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID = ENV.get('TELEGRAM_CHAT_ID', '')
+# ==================== 从环境变量加载配置 ====================
+ACCOUNTS_STR = os.environ.get('ACCOUNTS_DOMAIN', '')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 
 SESSION_DIR = Path(__file__).parent / "sessions"
 LOG_FILE = Path(__file__).parent / f"renew_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -126,7 +117,6 @@ def parse_expire_date(text: str) -> str:
     return "未知"
 
 def days_until_expire(expire_date: str) -> int:
-    """计算距离到期还有多少天"""
     if expire_date == "未知":
         return -1
     try:
@@ -137,7 +127,6 @@ def days_until_expire(expire_date: str) -> int:
         return -1
 
 async def login(page, cdp, context, email, password):
-    """Login if needed"""
     log(f"登录 {email}...")
     
     await page.goto("https://dash.domain.digitalplat.org/auth/login")
@@ -148,7 +137,6 @@ async def login(page, cdp, context, email, password):
     
     await asyncio.sleep(2)
     
-    # Accept cookies
     try:
         accept = await page.query_selector('button:has-text("Accept all")')
         if accept:
@@ -157,7 +145,6 @@ async def login(page, cdp, context, email, password):
     except:
         pass
     
-    # Step 1: Email
     email_input = await page.query_selector('input[placeholder="you@example.com"]')
     if email_input:
         await email_input.fill(email)
@@ -168,19 +155,15 @@ async def login(page, cdp, context, email, password):
         await next_btn.click()
     await asyncio.sleep(3)
     
-    # Step 2: Password
     pwd_input = await page.query_selector('input[placeholder="Your password"]')
     if pwd_input:
         await pwd_input.fill(password)
         log("密码已输入")
     
     await asyncio.sleep(2)
-    
-    # Turnstile
     await handle_turnstile(page, cdp)
     await asyncio.sleep(3)
     
-    # Login button
     login_btn = await page.query_selector('button:has-text("Login")')
     if login_btn:
         await login_btn.click()
@@ -198,7 +181,6 @@ async def login(page, cdp, context, email, password):
     return False
 
 async def get_domains(page, cdp):
-    """Get list of domains with retry"""
     log("获取域名列表...")
     
     for retry in range(3):
@@ -208,7 +190,6 @@ async def get_domains(page, cdp):
         await handle_security(page, cdp)
         await asyncio.sleep(2)
         
-        # Click My Domains
         my_domains = await page.query_selector('a:has-text("My Domains")')
         if my_domains:
             await my_domains.click()
@@ -217,7 +198,6 @@ async def get_domains(page, cdp):
         await handle_security(page, cdp)
         await asyncio.sleep(2)
         
-        # Get iframe content
         iframe = await page.query_selector('iframe')
         if not iframe:
             if retry < 2:
@@ -232,10 +212,8 @@ async def get_domains(page, cdp):
                 continue
             return []
         
-        # Extract domains
         content = await frame.evaluate('() => document.body.innerText')
         
-        # Match domain patterns
         domain_pattern = re.compile(r'([\w-]+\.(us\.kg|pp\.ua|eu\.org|nom\.za|co\.za))')
         matches = domain_pattern.findall(content)
         domains = list(set([m[0] for m in matches]))
@@ -251,7 +229,6 @@ async def get_domains(page, cdp):
     return domains
 
 async def renew_domain(page, cdp, domain):
-    """Renew a single domain"""
     log(f"\n{'='*50}")
     log(f"处理域名: {domain}")
     log(f"{'='*50}")
@@ -259,14 +236,12 @@ async def renew_domain(page, cdp, domain):
     old_expire = ""
     new_expire = ""
     
-    # Go to domain manager
     await page.goto(f"https://dash.domain.digitalplat.org/panel/main?page=%2Fpanel%2Fmanager%2F{domain}")
     await asyncio.sleep(3)
     await handle_cloudflare(page, cdp, 15)
     await handle_security(page, cdp)
     await asyncio.sleep(2)
     
-    # Get iframe with retry
     domain_info = ""
     for retry in range(3):
         iframe = await page.query_selector('iframe')
@@ -285,22 +260,18 @@ async def renew_domain(page, cdp, domain):
                 continue
             raise Exception("无法访问 iframe")
         
-        # Get domain info
         domain_info = await frame.evaluate('() => document.body.innerText')
         old_expire = parse_expire_date(domain_info)
         
-        # 如果成功获取到期日期，跳出循环
         if old_expire != "未知":
             break
         
-        # 内容未加载完成，等待后重试
         if retry < 2:
             log(f"iframe 内容未加载完成，重试 {retry + 1}/3...")
             await asyncio.sleep(3)
     
     log(f"当前到期日期: {old_expire}")
     
-    # 检查是否在续期窗口内 (180天)
     days_left = days_until_expire(old_expire)
     if days_left > 180:
         log(f"{domain} 距到期还有 {days_left} 天，超过180天，暂不需要续期")
@@ -308,7 +279,6 @@ async def renew_domain(page, cdp, domain):
     elif days_left > 0:
         log(f"{domain} 距到期还有 {days_left} 天，在续期窗口内")
     
-    # Click Renew button
     renew_btn = await frame.query_selector('button:has-text("Renew")')
     if not renew_btn:
         raise Exception("未找到 Renew 按钮")
@@ -319,24 +289,20 @@ async def renew_domain(page, cdp, domain):
     await handle_security(page, cdp)
     await asyncio.sleep(2)
     
-    # Refresh frame
     iframe = await page.query_selector('iframe')
     frame = await iframe.content_frame() if iframe else None
     if not frame:
         raise Exception("重新获取 frame 失败")
     
-    # Check for Free Renewal button
     free_renewal = await frame.query_selector('button:has-text("Free Renewal")')
     if not free_renewal:
         log(f"{domain} 未找到 Free Renewal 按钮，可能尚未到续期时间")
         return {'domain': domain, 'success': False, 'old_expire': old_expire, 'new_expire': old_expire, 'error': '未到续期时间', 'skip': False}
     
-    # Click Free Renewal
     log("点击 Free Renewal...")
     await free_renewal.click()
     await asyncio.sleep(5)
     
-    # Check for confirm dialog
     iframe = await page.query_selector('iframe')
     frame = await iframe.content_frame() if iframe else None
     if frame:
@@ -349,7 +315,6 @@ async def renew_domain(page, cdp, domain):
     await handle_security(page, cdp)
     await asyncio.sleep(3)
     
-    # Get result
     iframe = await page.query_selector('iframe')
     frame = await iframe.content_frame() if iframe else None
     if frame:
@@ -362,7 +327,6 @@ async def renew_domain(page, cdp, domain):
     return {'domain': domain, 'success': success, 'old_expire': old_expire, 'new_expire': new_expire, 'error': None, 'skip': False}
 
 async def process_account(email: str, password: str):
-    """Process a single account"""
     log(f"\n{'#'*60}")
     log(f"处理账号: {email}")
     log(f"{'#'*60}")
@@ -372,8 +336,8 @@ async def process_account(email: str, password: str):
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,
-            args=['--disable-blink-features=AutomationControlled']
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
         )
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 900},
@@ -383,14 +347,12 @@ async def process_account(email: str, password: str):
         cdp = await context.new_cdp_session(page)
         
         try:
-            # Load session
             if session_file.exists():
                 with open(session_file) as f:
                     cookies = json.load(f)
                 await context.add_cookies(cookies)
                 log("会话已加载")
             
-            # Check login status
             await page.goto("https://dash.domain.digitalplat.org/")
             await asyncio.sleep(3)
             await handle_cloudflare(page, cdp)
@@ -405,14 +367,12 @@ async def process_account(email: str, password: str):
             else:
                 log("已登录")
             
-            # Get domains
             domains = await get_domains(page, cdp)
             
             if not domains:
                 log("未找到域名")
                 return []
             
-            # Renew each domain
             for domain in domains:
                 try:
                     result = await renew_domain(page, cdp, domain)
@@ -421,7 +381,6 @@ async def process_account(email: str, password: str):
                     log(f"{domain} 续期失败: {e}")
                     results.append({'domain': domain, 'success': False, 'old_expire': '', 'new_expire': '', 'error': str(e), 'skip': False})
             
-            # Save session
             cookies = await context.cookies()
             with open(session_file, 'w') as f:
                 json.dump(cookies, f, indent=2)
@@ -440,9 +399,13 @@ async def main():
     log(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log("=" * 60)
     
+    if not ACCOUNTS_STR:
+        log("错误: 未设置 ACCOUNTS_DOMAIN 环境变量")
+        return False
+    
     accounts = parse_accounts(ACCOUNTS_STR)
     if not accounts:
-        log("错误: 未配置账号")
+        log("错误: 无有效账号配置")
         return False
     
     log(f"账号数量: {len(accounts)}")
@@ -461,7 +424,6 @@ async def main():
             errors.append(f"{account['email']}: {str(e)}")
             log(f"账号 {account['email']} 处理异常: {e}")
     
-    # Summary
     log("\n" + "=" * 60)
     log("任务汇总")
     log("=" * 60)
@@ -481,19 +443,14 @@ async def main():
     
     log(f"\n总计: {success_count} 成功, {skip_count} 跳过, {len(all_results)} 总数")
     
-    # Send Telegram notification
     if all_results or errors:
-        # 判断通知类型
         if errors and not all_results:
-            # 全部失败
             emoji = "🚨"
             title = "域名续期失败 - 请检查"
         elif errors:
-            # 部分失败
             emoji = "⚠️"
             title = "域名续期异常 - 部分账号失败"
         elif skip_count == len(all_results):
-            # 全部跳过
             emoji = "💤"
             title = "域名检查完成 - 暂无需续期"
         elif success_count == need_renew_count and need_renew_count > 0:
@@ -508,14 +465,12 @@ async def main():
         
         lines = [f"{emoji} <b>{title}</b>", ""]
         
-        # 显示错误信息
         if errors:
             lines.append("<b>❌ 错误:</b>")
             for err in errors:
                 lines.append(f"   {err}")
             lines.append("")
         
-        # 显示域名结果
         if all_results:
             for r in all_results:
                 if r.get('skip'):
@@ -538,7 +493,6 @@ async def main():
         else:
             log("Telegram 通知发送失败")
     else:
-        # 没有任何结果也没有错误，发送异常通知
         msg = f"🚨 <b>域名续期异常</b>\n\n未获取到任何域名信息，脚本可能运行异常\n\n🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         send_telegram(msg)
         log("发送异常通知")
