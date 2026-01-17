@@ -336,7 +336,7 @@ async def process_account(email: str, password: str):
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True,
+            headless=False,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
         )
         context = await browser.new_context(
