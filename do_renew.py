@@ -106,29 +106,47 @@ async def handle_security(page, cdp):
     return True
 
 async def handle_turnstile(page, cdp):
-    """处理 Turnstile 验证"""
+    """处理 Turnstile 验证 (支持 reCAPTCHA 兼容模式)"""
     log("等待 Turnstile 验证...")
     
-    # 动态获取 Turnstile 位置
+    # 动态获取 Turnstile 位置 (支持 cf-turnstile 和 g-recaptcha 兼容模式)
     turnstile = await page.evaluate("""() => {
-        const el = document.querySelector('.cf-turnstile, [data-turnstile], iframe[src*="turnstile"]');
-        if (el) { const r = el.getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; }
+        // 标准 cf-turnstile
+        let el = document.querySelector('.cf-turnstile');
+        if (el) { const r = el.getBoundingClientRect(); return {type: 'cf-turnstile', x: r.x, y: r.y, w: r.width, h: r.height}; }
+        
+        // reCAPTCHA 兼容模式 (g-recaptcha with data-sitekey starting with 0x)
+        el = document.querySelector('.g-recaptcha[data-sitekey^="0x"]');
+        if (el) { const r = el.getBoundingClientRect(); return {type: 'g-recaptcha-compat', x: r.x, y: r.y, w: r.width, h: r.height}; }
+        
+        // 任何 g-recaptcha
+        el = document.querySelector('.g-recaptcha');
+        if (el) { const r = el.getBoundingClientRect(); return {type: 'g-recaptcha', x: r.x, y: r.y, w: r.width, h: r.height}; }
+        
+        // iframe
+        el = document.querySelector('iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"]');
+        if (el) { const r = el.getBoundingClientRect(); return {type: 'iframe', x: r.x, y: r.y, w: r.width, h: r.height}; }
+        
         return null;
     }""")
     
-    if turnstile:
+    if turnstile and turnstile.get('w', 0) > 0:
         x = int(turnstile['x'] + 30)
         y = int(turnstile['y'] + 25)
-        log(f"点击 Turnstile ({x}, {y})")
+        log(f"点击 Turnstile ({turnstile['type']}) ({x}, {y})")
         await cdp_click(cdp, x, y)
     else:
         log("未找到 Turnstile 元素，尝试固定位置")
         await cdp_click(cdp, 477, 391)
     
-    # 无论哪种方式，都等待验证完成
+    # 等待验证完成 (检查两种 input)
     for i in range(30):
         await asyncio.sleep(1)
-        response = await page.evaluate('() => document.querySelector("input[name=cf-turnstile-response]")?.value || ""')
+        response = await page.evaluate('''() => {
+            const cf = document.querySelector("input[name=cf-turnstile-response]");
+            const g = document.querySelector("input[name=g-recaptcha-response]");
+            return (cf && cf.value) || (g && g.value) || "";
+        }''')
         if len(response) > 10:
             log("Turnstile 验证完成")
             return True
