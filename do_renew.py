@@ -48,8 +48,11 @@ def get_session_file(email: str) -> Path:
 def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {msg}"
-    print(line)
-    with open(LOG_FILE, 'a') as f:
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        print(line.encode('utf-8', errors='replace').decode('gbk', errors='replace'))
+    with open(LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(line + '\n')
 
 
