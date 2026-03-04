@@ -17,12 +17,15 @@ import requests
 from pathlib import Path
 from datetime import datetime
 from playwright.async_api import async_playwright
+from dotenv import load_dotenv
 
 # ==================== 从环境变量加载配置 ====================
+load_dotenv()
 ACCOUNTS_STR = os.environ.get('DOMAIN_ACCOUNT', '')
 
 SESSION_DIR = Path(__file__).parent / "sessions"
 LOG_FILE = Path(__file__).parent / f"renew_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+
 
 def parse_accounts(accounts_str: str) -> list:
     accounts = []
@@ -35,10 +38,12 @@ def parse_accounts(accounts_str: str) -> list:
             accounts.append({'email': email.strip(), 'password': password.strip()})
     return accounts
 
+
 def get_session_file(email: str) -> Path:
     SESSION_DIR.mkdir(exist_ok=True)
     safe_name = email.replace('@', '_at_').replace('.', '_')
     return SESSION_DIR / f"{safe_name}.json"
+
 
 def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -46,6 +51,7 @@ def log(msg):
     print(line)
     with open(LOG_FILE, 'a') as f:
         f.write(line + '\n')
+
 
 def mask_email(email: str) -> str:
     if '@' not in email:
@@ -55,18 +61,24 @@ def mask_email(email: str) -> str:
         return f"*@{domain}"
     return f"{local[0]}***@{domain}"
 
+
 # 青龙通知
 try:
     from notify import send as notify_send
 except ImportError:
-    def notify_send(title, content): log(f"[通知] {title}: {content}")
+    def notify_send(title, content):
+        log(f"[通知] {title}: {content}")
+
 
 async def cdp_click(cdp, x, y):
     await cdp.send('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': x, 'y': y})
     await asyncio.sleep(0.1)
-    await cdp.send('Input.dispatchMouseEvent', {'type': 'mousePressed', 'x': x, 'y': y, 'button': 'left', 'clickCount': 1})
+    await cdp.send('Input.dispatchMouseEvent',
+                   {'type': 'mousePressed', 'x': x, 'y': y, 'button': 'left', 'clickCount': 1})
     await asyncio.sleep(0.05)
-    await cdp.send('Input.dispatchMouseEvent', {'type': 'mouseReleased', 'x': x, 'y': y, 'button': 'left', 'clickCount': 1})
+    await cdp.send('Input.dispatchMouseEvent',
+                   {'type': 'mouseReleased', 'x': x, 'y': y, 'button': 'left', 'clickCount': 1})
+
 
 async def handle_cloudflare(page, cdp, max_attempts=30):
     for attempt in range(max_attempts):
@@ -89,6 +101,7 @@ async def handle_cloudflare(page, cdp, max_attempts=30):
         await asyncio.sleep(2)
     return False
 
+
 async def handle_security(page, cdp):
     content = await page.content()
     if 'Security Check' in content:
@@ -102,6 +115,7 @@ async def handle_security(page, cdp):
                 return True
             await asyncio.sleep(1)
     return True
+
 
 async def handle_turnstile(page, cdp):
     """处理 Turnstile 验证 (支持 reCAPTCHA 兼容模式)"""
@@ -149,10 +163,11 @@ async def handle_turnstile(page, cdp):
             log("Turnstile 验证完成")
             return True
         if i % 5 == 4:
-            log(f"等待 Turnstile... ({i+1}/30)")
+            log(f"等待 Turnstile... ({i + 1}/30)")
 
     log("Turnstile 验证超时")
     return False
+
 
 def parse_expire_date(text: str) -> str:
     match = re.search(r'Expire Date:\s*(\d{8})', text)
@@ -160,6 +175,7 @@ def parse_expire_date(text: str) -> str:
         date_str = match.group(1)
         return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
     return "未知"
+
 
 def days_until_expire(expire_date: str) -> int:
     if expire_date == "未知":
@@ -170,6 +186,7 @@ def days_until_expire(expire_date: str) -> int:
         return delta.days
     except:
         return -1
+
 
 async def login(page, cdp, context, email, password):
     log(f"登录 {mask_email(email)}...")
@@ -235,6 +252,7 @@ async def login(page, cdp, context, email, password):
         pass
     return False
 
+
 async def get_domains(page, cdp):
     log("获取域名列表...")
 
@@ -283,10 +301,11 @@ async def get_domains(page, cdp):
     log(f"找到 {len(domains)} 个域名: {domains}")
     return domains
 
+
 async def renew_domain(page, cdp, domain):
-    log(f"\n{'='*50}")
+    log(f"\n{'=' * 50}")
     log(f"处理域名: {domain}")
-    log(f"{'='*50}")
+    log(f"{'=' * 50}")
 
     old_expire = ""
     new_expire = ""
@@ -330,7 +349,8 @@ async def renew_domain(page, cdp, domain):
     days_left = days_until_expire(old_expire)
     if days_left > 180:
         log(f"{domain} 距到期还有 {days_left} 天，超过180天，暂不需要续期")
-        return {'domain': domain, 'success': False, 'old_expire': old_expire, 'new_expire': old_expire, 'error': f'距到期{days_left}天，暂不需续期', 'skip': True}
+        return {'domain': domain, 'success': False, 'old_expire': old_expire, 'new_expire': old_expire,
+                'error': f'距到期{days_left}天，暂不需续期', 'skip': True}
     elif days_left > 0:
         log(f"{domain} 距到期还有 {days_left} 天，在续期窗口内")
 
@@ -352,7 +372,8 @@ async def renew_domain(page, cdp, domain):
     free_renewal = await frame.query_selector('button:has-text("Free Renewal")')
     if not free_renewal:
         log(f"{domain} 未找到 Free Renewal 按钮，可能尚未到续期时间")
-        return {'domain': domain, 'success': False, 'old_expire': old_expire, 'new_expire': old_expire, 'error': '未到续期时间', 'skip': False}
+        return {'domain': domain, 'success': False, 'old_expire': old_expire, 'new_expire': old_expire,
+                'error': '未到续期时间', 'skip': False}
 
     log("点击 Free Renewal...")
     await free_renewal.click()
@@ -361,7 +382,8 @@ async def renew_domain(page, cdp, domain):
     iframe = await page.query_selector('iframe')
     frame = await iframe.content_frame() if iframe else None
     if frame:
-        confirm = await frame.query_selector('button:has-text("Confirm"), button:has-text("Yes"), button:has-text("OK")')
+        confirm = await frame.query_selector(
+            'button:has-text("Confirm"), button:has-text("Yes"), button:has-text("OK")')
         if confirm:
             log("点击确认...")
             await confirm.click()
@@ -379,12 +401,14 @@ async def renew_domain(page, cdp, domain):
     log(f"新到期日期: {new_expire}")
 
     success = new_expire != old_expire or new_expire != "未知"
-    return {'domain': domain, 'success': success, 'old_expire': old_expire, 'new_expire': new_expire, 'error': None, 'skip': False}
+    return {'domain': domain, 'success': success, 'old_expire': old_expire, 'new_expire': new_expire, 'error': None,
+            'skip': False}
+
 
 async def process_account(email: str, password: str):
-    log(f"\n{'#'*60}")
+    log(f"\n{'#' * 60}")
     log(f"处理账号: {mask_email(email)}")
-    log(f"{'#'*60}")
+    log(f"{'#' * 60}")
 
     session_file = get_session_file(email)
     results = []
@@ -392,7 +416,8 @@ async def process_account(email: str, password: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+                  '--disable-blink-features=AutomationControlled']
         )
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 900},
@@ -434,7 +459,9 @@ async def process_account(email: str, password: str):
                     results.append(result)
                 except Exception as e:
                     log(f"{domain} 续期失败: {e}")
-                    results.append({'domain': domain, 'success': False, 'old_expire': '', 'new_expire': '', 'error': str(e), 'skip': False})
+                    results.append(
+                        {'domain': domain, 'success': False, 'old_expire': '', 'new_expire': '', 'error': str(e),
+                         'skip': False})
 
             cookies = await context.cookies()
             with open(session_file, 'w') as f:
@@ -447,6 +474,7 @@ async def process_account(email: str, password: str):
             await browser.close()
 
     return results
+
 
 async def main():
     log("=" * 60)
@@ -567,6 +595,7 @@ async def main():
         notify_send("域名续期异常", msg)
 
     return (success_count > 0 or skip_count > 0) and not errors
+
 
 if __name__ == '__main__':
     result = asyncio.run(main())

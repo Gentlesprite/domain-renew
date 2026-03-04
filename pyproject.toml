@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "DigitalPlat 免费域名自动续期脚本"
 requires-python = ">=3.10"
 dependencies = [
+    "dotenv>=0.9.9",
     "playwright>=1.40.0",
     "requests>=2.31.0",
 ]
